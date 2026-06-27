@@ -1,0 +1,20 @@
+// Re-export all schemas for client use
+export type {
+  MessageEnvelope,
+  MessagePayload,
+  MessageMetadata,
+  MessageStatus,
+  WSFrame,
+  WSFrameType,
+  ConnectionOpenPayload,
+  MessageSendPayload,
+  MessageAckPayload,
+  MessageStatusUpdatePayload,
+  UserPresencePayload,
+  RoomSyncRequestPayload,
+  RoomSyncResponsePayload,
+  ConsoleEventPayload,
+  ConsoleCommandPayload,
+  ErrorFramePayload,
+  SessionRecord,
+} from "../../worker/src/schemas.js";

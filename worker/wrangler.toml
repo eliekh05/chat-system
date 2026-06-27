@@ -1,0 +1,22 @@
+name = "chat-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[durable_objects]
+bindings = [
+  { name = "ROOM", class_name = "RoomDurableObject" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDurableObject"]
+
+[[kv_namespaces]]
+binding = "CHAT_KV"
+id = "ac5892eb53a147da9cecbde752dd7056"          # Replace with: wrangler kv namespace create CHAT_KV
+
+[vars]
+# No secrets here — use: wrangler secret put SECRET_NAME
+
+[dev]
+port = 8787
