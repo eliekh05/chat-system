@@ -45,7 +45,11 @@ export default {
         );
       }
 
-      const session = await createSession(env.CHAT_KV, body.displayName.trim().substring(0, 32));
+      const session = await createSession(
+        env.CHAT_KV,
+        body.displayName.trim().substring(0, 32),
+        body.userId?.trim()
+      );
       return new Response(JSON.stringify(session), {
         status: 201,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

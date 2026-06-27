@@ -3,7 +3,7 @@ import type { MessageEnvelope, MessageStatus } from "../types.js";
 
 interface ChatState {
   messages: MessageEnvelope[];
-  presenceMap: Map<string, { userId: string; displayName: string }>;
+  presenceMap: Map<string, { sessionId: string; userId: string; displayName: string }>;
 }
 
 type ChatAction =
@@ -11,8 +11,8 @@ type ChatAction =
   | { type: "MESSAGE_STATUS_UPDATE"; messageId: string; status: MessageStatus }
   | { type: "MESSAGE_OPTIMISTIC"; message: MessageEnvelope }
   | { type: "SYNC_HISTORY"; messages: MessageEnvelope[] }
-  | { type: "USER_JOIN"; userId: string; displayName: string }
-  | { type: "USER_LEAVE"; userId: string };
+  | { type: "USER_JOIN"; sessionId: string; userId: string; displayName: string }
+  | { type: "USER_LEAVE"; sessionId: string };
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
@@ -54,13 +54,13 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "USER_JOIN": {
       const next = new Map(state.presenceMap);
-      next.set(action.userId, { userId: action.userId, displayName: action.displayName });
+      next.set(action.sessionId, { sessionId: action.sessionId, userId: action.userId, displayName: action.displayName });
       return { ...state, presenceMap: next };
     }
 
     case "USER_LEAVE": {
       const next = new Map(state.presenceMap);
-      next.delete(action.userId);
+      next.delete(action.sessionId);
       return { ...state, presenceMap: next };
     }
 
@@ -87,11 +87,11 @@ export function useChatStore() {
   const syncHistory = useCallback((messages: MessageEnvelope[]) =>
     dispatch({ type: "SYNC_HISTORY", messages }), []);
 
-  const userJoin = useCallback((userId: string, displayName: string) =>
-    dispatch({ type: "USER_JOIN", userId, displayName }), []);
+  const userJoin = useCallback((sessionId: string, userId: string, displayName: string) =>
+    dispatch({ type: "USER_JOIN", sessionId, userId, displayName }), []);
 
-  const userLeave = useCallback((userId: string) =>
-    dispatch({ type: "USER_LEAVE", userId }), []);
+  const userLeave = useCallback((sessionId: string) =>
+    dispatch({ type: "USER_LEAVE", sessionId }), []);
 
   return {
     messages: state.messages,

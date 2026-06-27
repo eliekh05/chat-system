@@ -33,6 +33,7 @@ export const ChatView: React.FC<Props> = ({
   receiverId,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [currentSessionId, setCurrentSessionId] = React.useState<string>("");
   const store = useChatStore();
   const { connected, send, on } = useWSClient({
     workerBaseUrl,
@@ -43,6 +44,10 @@ export const ChatView: React.FC<Props> = ({
 
   // Subscribe to incoming events
   useEffect(() => {
+    const unsubOpen = on<ConnectionOpenPayload>("connection.open", (frame) => {
+      setCurrentSessionId(frame.payload.sessionId);
+    });
+
     const unsubReceive = on<MessageEnvelope>("message.receive", (frame) => {
       store.receiveMessage(frame.payload);
     });
@@ -52,11 +57,11 @@ export const ChatView: React.FC<Props> = ({
     });
 
     const unsubJoin = on<UserPresencePayload>("user.join", (frame) => {
-      store.userJoin(frame.payload.userId, frame.payload.displayName);
+      store.userJoin(frame.payload.sessionId, frame.payload.userId, frame.payload.displayName);
     });
 
     const unsubLeave = on<UserPresencePayload>("user.leave", (frame) => {
-      store.userLeave(frame.payload.userId);
+      store.userLeave(frame.payload.sessionId);
     });
 
     const unsubSync = on<RoomSyncResponsePayload>("room.sync_response", (frame) => {
@@ -64,6 +69,7 @@ export const ChatView: React.FC<Props> = ({
     });
 
     return () => {
+      unsubOpen();
       unsubReceive();
       unsubStatus();
       unsubJoin();
@@ -166,7 +172,7 @@ export const ChatView: React.FC<Props> = ({
           </span>
         </div>
 
-        <PresenceBar presenceMap={store.presenceMap} currentUserId={userId} />
+        <PresenceBar presenceMap={store.presenceMap} currentSessionId={currentSessionId} />
 
         {/* Message thread */}
         <div

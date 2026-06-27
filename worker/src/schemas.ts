@@ -52,8 +52,8 @@ export interface WSFrame<T = unknown> {
 }
 
 export interface ConnectionOpenPayload {
+  sessionId: string;
   userId: string;
-  sessionToken: string;
   displayName: string;
   protocolVersion: number;
 }
@@ -75,6 +75,7 @@ export interface MessageStatusUpdatePayload {
 }
 
 export interface UserPresencePayload {
+  sessionId: string;
   userId: string;
   displayName: string;
 }

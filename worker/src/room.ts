@@ -104,7 +104,7 @@ export class RoomDurableObject implements DurableObject {
       frameId: crypto.randomUUID(),
       roomId,
       timestamp: Date.now(),
-      payload: { userId: session.userId, displayName: session.displayName },
+      payload: { sessionId, userId: session.userId, displayName: session.displayName },
     });
 
     // Emit console event
@@ -211,7 +211,7 @@ export class RoomDurableObject implements DurableObject {
         frameId: crypto.randomUUID(),
         roomId,
         timestamp: Date.now(),
-        payload: { userId: session.userId, displayName: session.displayName },
+        payload: { sessionId, userId: session.userId, displayName: session.displayName },
       });
 
       this.broadcastConsole(

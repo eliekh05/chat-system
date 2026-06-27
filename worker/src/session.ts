@@ -6,19 +6,21 @@ const KV_USER_PREFIX = "user:";
 
 export async function createSession(
   kv: KVNamespace,
-  displayName: string
+  displayName: string,
+  userId?: string
 ): Promise<SessionRecord> {
-  const userId = crypto.randomUUID();
+  const finalUserId = userId || crypto.randomUUID();
   const sessionToken = crypto.randomUUID();
   const now = Date.now();
 
   const record: SessionRecord = {
-    userId,
+    userId: finalUserId,
     sessionToken,
     displayName,
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS,
   };
+
 
   // Store by token (for lookup during WS auth)
   await kv.put(
@@ -29,10 +31,11 @@ export async function createSession(
 
   // Store user profile by userId
   await kv.put(
-    `${KV_USER_PREFIX}${userId}`,
-    JSON.stringify({ userId, displayName }),
+    `${KV_USER_PREFIX}${finalUserId}`,
+    JSON.stringify({ userId: finalUserId, displayName }),
     { expirationTtl: SESSION_TTL_MS / 1000 }
   );
+
 
   return record;
 }

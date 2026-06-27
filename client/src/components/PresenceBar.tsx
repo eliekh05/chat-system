@@ -1,13 +1,13 @@
 import React from "react";
 
 interface Props {
-  presenceMap: Map<string, { userId: string; displayName: string }>;
-  currentUserId: string;
+  presenceMap: Map<string, { sessionId: string; userId: string; displayName: string }>;
+  currentSessionId: string;
 }
 
-export const PresenceBar: React.FC<Props> = ({ presenceMap, currentUserId }) => {
+export const PresenceBar: React.FC<Props> = ({ presenceMap, currentSessionId }) => {
   const others = Array.from(presenceMap.values()).filter(
-    (p) => p.userId !== currentUserId
+    (p) => p.sessionId !== currentSessionId
   );
 
   return (

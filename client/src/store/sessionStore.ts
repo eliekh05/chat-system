@@ -21,12 +21,13 @@ export function useSessionStore() {
 
   const createSession = useCallback(async (
     workerBaseUrl: string,
-    displayName: string
+    displayName: string,
+    userId?: string
   ): Promise<SessionRecord> => {
     const res = await fetch(`${workerBaseUrl}/api/session/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ displayName }),
+      body: JSON.stringify({ displayName, userId }),
     });
 
     if (!res.ok) {

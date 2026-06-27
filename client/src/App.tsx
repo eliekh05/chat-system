@@ -7,6 +7,7 @@ const DEFAULT_ROOM = "general";
 
 export default function App() {
   const { session, createSession } = useSessionStore();
+  const [userIdInput, setUserIdInput] = useState("");
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [receiverIdInput, setReceiverIdInput] = useState("");
   const [roomId] = useState(DEFAULT_ROOM);
@@ -20,14 +21,18 @@ export default function App() {
     setCreating(true);
     setError(null);
     try {
-      await createSession(WORKER_BASE_URL, displayNameInput.trim());
+      await createSession(
+        WORKER_BASE_URL,
+        displayNameInput.trim(),
+        userIdInput.trim() || undefined
+      );
       setActiveReceiverId(receiverIdInput.trim());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to create session");
     } finally {
       setCreating(false);
     }
-  }, [displayNameInput, receiverIdInput, createSession]);
+  }, [displayNameInput, receiverIdInput, userIdInput, createSession]);
 
   if (session && activeReceiverId) {
     return (
@@ -65,10 +70,17 @@ export default function App() {
         <h2 style={{ margin: "0 0 24px", fontSize: "22px" }}>Join Chat</h2>
         <input
           type="text"
+          placeholder="Your User ID (optional)"
+          value={userIdInput}
+          onChange={(e) => setUserIdInput(e.target.value)}
+          style={inputStyle}
+        />
+        <input
+          type="text"
           placeholder="Your display name"
           value={displayNameInput}
           onChange={(e) => setDisplayNameInput(e.target.value)}
-          style={inputStyle}
+          style={{ ...inputStyle, marginTop: "12px" }}
         />
         <input
           type="text"
