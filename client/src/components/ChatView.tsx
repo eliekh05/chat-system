@@ -32,6 +32,7 @@ export const ChatView: React.FC<Props> = ({
   displayName,
   initialReceiverId,
 }) => {
+  console.log("[ChatView] userId prop:", userId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentSessionId, setCurrentSessionId] = React.useState<string>("");
   const store = useChatStore();
@@ -181,10 +182,10 @@ export const ChatView: React.FC<Props> = ({
           />
           <span style={{ fontWeight: 600 }}>Room: {roomId}</span>
           <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
-            My ID: {userId}
+            My ID: {userId || "Unknown"}
           </span>
           <span style={{ color: "#0b93f6", fontSize: "13px", marginLeft: "12px", fontWeight: 500 }}>
-            Chatting with: {store.receiverId || "None"}
+            Chatting with: {store.receiverId || initialReceiverId || "None"}
           </span>
           <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
             {connected ? "Connected" : "Reconnecting…"}

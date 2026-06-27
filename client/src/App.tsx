@@ -34,7 +34,7 @@ export default function App() {
     }
   }, [displayNameInput, receiverIdInput, userIdInput, createSession]);
 
-  if (session && activeReceiverId) {
+  if (session?.userId && activeReceiverId) {
     return (
       <ChatView
         workerBaseUrl={WORKER_BASE_URL}
