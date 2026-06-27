@@ -25,6 +25,7 @@ export class WSClient {
   private reconnectAttempts = 0;
   private isIntentionallyClosed = false;
   private frameQueue: string[] = []; // queued frames while reconnecting
+  private lastOpenPayload: ConnectionOpenPayload | null = null;
 
   constructor(config: WSClientConfig) {
     this.config = config;
@@ -39,7 +40,9 @@ export class WSClient {
   disconnect(): void {
     this.isIntentionallyClosed = true;
     this.clearTimers();
-    this.ws?.close(1000, "Client disconnect");
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CLOSING) {
+      this.ws.close(1000, "Client disconnect");
+    }
     this.ws = null;
   }
 
@@ -58,6 +61,17 @@ export class WSClient {
       this.handlers.set(type, new Set());
     }
     this.handlers.get(type)!.add(handler as FrameHandler);
+
+    // If the handler is for connection.open and we already have the payload, fire it immediately
+    if (type === "connection.open" && this.lastOpenPayload) {
+      handler({
+        type: "connection.open",
+        frameId: "cached",
+        roomId: this.config.roomId,
+        timestamp: Date.now(),
+        payload: this.lastOpenPayload,
+      } as WSFrame<ConnectionOpenPayload>);
+    }
 
     // Return unsubscribe function
     return () => {
@@ -107,6 +121,10 @@ export class WSClient {
     } catch {
       console.error("[WSClient] Received malformed frame:", raw);
       return;
+    }
+
+    if (frame.type === "connection.open") {
+      this.lastOpenPayload = frame.payload as ConnectionOpenPayload;
     }
 
     const handlers = this.handlers.get(frame.type);

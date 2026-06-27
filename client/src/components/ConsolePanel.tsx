@@ -76,7 +76,13 @@ export const ConsolePanel: React.FC<Props> = ({ onCommand, onFrame, roomId }) =>
       }
     });
 
-    const resizeObserver = new ResizeObserver(() => fitAddon.fit());
+    const resizeObserver = new ResizeObserver(() => {
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        // Terminal might have been disposed
+      }
+    });
     resizeObserver.observe(containerRef.current);
 
     return () => {

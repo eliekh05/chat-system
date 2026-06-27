@@ -12,6 +12,7 @@ export interface MessagePayload {
 export interface MessageMetadata {
   clientTimestamp: number;
   sessionId: string;
+  optimisticId: string;
   version: number;
 }
 
@@ -70,6 +71,7 @@ export interface MessageAckPayload {
 }
 
 export interface MessageStatusUpdatePayload {
+  optimisticId: string;
   messageId: string;
   status: MessageStatus;
 }

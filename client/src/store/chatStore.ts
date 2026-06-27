@@ -17,7 +17,21 @@ type ChatAction =
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "MESSAGE_RECEIVE": {
-      // Avoid duplicates
+      // If this is a real message replacing an optimistic one, find the optimistic one
+      const existingIndex = state.messages.findIndex(
+        (m) => m.metadata.optimisticId === action.message.metadata.optimisticId && m.metadata.optimisticId !== ""
+      );
+
+      if (existingIndex !== -1) {
+        const nextMessages = [...state.messages];
+        nextMessages[existingIndex] = action.message;
+        return {
+          ...state,
+          messages: nextMessages.sort((a, b) => a.timestamp - b.timestamp),
+        };
+      }
+
+      // Avoid duplicates for non-optimistic messages
       if (state.messages.some((m) => m.messageId === action.message.messageId)) {
         return state;
       }
@@ -38,7 +52,11 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         messages: state.messages.map((m) =>
-          m.messageId === action.messageId ? { ...m, status: action.status } : m
+          m.metadata.optimisticId === action.optimisticId
+            ? { ...m, messageId: action.messageId, status: action.status }
+            : m.messageId === action.messageId
+            ? { ...m, status: action.status }
+            : m
         ),
       };
     }

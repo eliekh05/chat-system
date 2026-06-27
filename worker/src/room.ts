@@ -249,14 +249,15 @@ export class RoomDurableObject implements DurableObject {
       metadata: {
         clientTimestamp,
         sessionId: senderSession.sessionId,
+        optimisticId: frame.frameId,
         version: 1,
       },
     };
 
-    // Send to receiver if online
+    // Send to receiver AND sender if online
     let delivered = false;
     for (const [, s] of this.sessions) {
-      if (s.userId === receiverId) {
+      if (s.userId === receiverId || s.userId === senderSession.userId) {
         s.ws.send(
           JSON.stringify({
             type: "message.receive",
@@ -266,7 +267,7 @@ export class RoomDurableObject implements DurableObject {
             payload: envelope,
           })
         );
-        delivered = true;
+        if (s.userId === receiverId) delivered = true;
       }
     }
 
@@ -284,6 +285,7 @@ export class RoomDurableObject implements DurableObject {
         roomId,
         timestamp: Date.now(),
         payload: {
+          optimisticId: frame.frameId,
           messageId: envelope.messageId,
           status: envelope.status,
         },

@@ -110,7 +110,7 @@ export const ChatView: React.FC<Props> = ({
         timestamp: now,
         payload: { type: "text", body },
         status: "sending",
-        metadata: { clientTimestamp: now, sessionId: "", version: 1 },
+        metadata: { clientTimestamp: now, sessionId: "", optimisticId: optimisticId, version: 1 },
       };
       store.addOptimisticMessage(optimistic);
 
