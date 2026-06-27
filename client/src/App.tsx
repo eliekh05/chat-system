@@ -42,7 +42,7 @@ export default function App() {
         sessionToken={session.sessionToken}
         userId={session.userId}
         displayName={session.displayName}
-        receiverId={activeReceiverId}
+        initialReceiverId={activeReceiverId}
       />
     );
   }
@@ -70,7 +70,7 @@ export default function App() {
         <h2 style={{ margin: "0 0 24px", fontSize: "22px" }}>Join Chat</h2>
         <input
           type="text"
-          placeholder="Your User ID (optional)"
+          placeholder="Your User ID (share this to receive messages)"
           value={userIdInput}
           onChange={(e) => setUserIdInput(e.target.value)}
           style={inputStyle}

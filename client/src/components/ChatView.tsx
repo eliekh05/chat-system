@@ -21,7 +21,7 @@ interface Props {
   sessionToken: string;
   userId: string;
   displayName: string;
-  receiverId: string; // For 1:1 chat
+  initialReceiverId: string;
 }
 
 export const ChatView: React.FC<Props> = ({
@@ -30,7 +30,7 @@ export const ChatView: React.FC<Props> = ({
   sessionToken,
   userId,
   displayName,
-  receiverId,
+  initialReceiverId,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentSessionId, setCurrentSessionId] = React.useState<string>("");
@@ -41,6 +41,13 @@ export const ChatView: React.FC<Props> = ({
     sessionToken,
     enabled: true,
   });
+
+  // Initialize receiver
+  useEffect(() => {
+    if (initialReceiverId) {
+      store.setReceiver(initialReceiverId);
+    }
+  }, [initialReceiverId, store]);
 
   // Subscribe to incoming events
   useEffect(() => {
@@ -100,6 +107,12 @@ export const ChatView: React.FC<Props> = ({
     (body: string) => {
       const optimisticId = crypto.randomUUID();
       const now = Date.now();
+      const receiverId = store.receiverId;
+
+      if (!receiverId) {
+        alert("No receiver selected!");
+        return;
+      }
 
       // Optimistic message for instant UI feedback
       const optimistic: MessageEnvelope = {
@@ -121,7 +134,7 @@ export const ChatView: React.FC<Props> = ({
         payload: { receiverId, body, clientTimestamp: now },
       });
     },
-    [send, store, userId, receiverId, roomId]
+    [send, store, userId, roomId]
   );
 
   const handleConsoleCommand = useCallback(
@@ -167,7 +180,13 @@ export const ChatView: React.FC<Props> = ({
             }}
           />
           <span style={{ fontWeight: 600 }}>Room: {roomId}</span>
-          <span style={{ color: "#888", fontSize: "13px" }}>
+          <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
+            My ID: {userId}
+          </span>
+          <span style={{ color: "#0b93f6", fontSize: "13px", marginLeft: "12px", fontWeight: 500 }}>
+            Chatting with: {store.receiverId || "None"}
+          </span>
+          <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
             {connected ? "Connected" : "Reconnecting…"}
           </span>
         </div>
@@ -189,6 +208,7 @@ export const ChatView: React.FC<Props> = ({
               key={msg.messageId}
               message={msg}
               isSelf={msg.senderId === userId}
+              onReply={(id) => store.setReceiver(id)}
             />
           ))}
         </div>

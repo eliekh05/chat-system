@@ -4,15 +4,17 @@ import type { MessageEnvelope, MessageStatus } from "../types.js";
 interface ChatState {
   messages: MessageEnvelope[];
   presenceMap: Map<string, { sessionId: string; userId: string; displayName: string }>;
+  receiverId: string;
 }
 
 type ChatAction =
   | { type: "MESSAGE_RECEIVE"; message: MessageEnvelope }
-  | { type: "MESSAGE_STATUS_UPDATE"; messageId: string; status: MessageStatus }
+  | { type: "MESSAGE_STATUS_UPDATE"; messageId: string; status: MessageStatus; optimisticId: string }
   | { type: "MESSAGE_OPTIMISTIC"; message: MessageEnvelope }
   | { type: "SYNC_HISTORY"; messages: MessageEnvelope[] }
   | { type: "USER_JOIN"; sessionId: string; userId: string; displayName: string }
-  | { type: "USER_LEAVE"; sessionId: string };
+  | { type: "USER_LEAVE"; sessionId: string }
+  | { type: "SET_RECEIVER"; receiverId: string };
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
@@ -81,6 +83,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       next.delete(action.sessionId);
       return { ...state, presenceMap: next };
     }
+    case "SET_RECEIVER": {
+      return { ...state, receiverId: action.receiverId };
+    }
 
     default:
       return state;
@@ -91,6 +96,7 @@ export function useChatStore() {
   const [state, dispatch] = useReducer(chatReducer, {
     messages: [],
     presenceMap: new Map(),
+    receiverId: "",
   });
 
   const receiveMessage = useCallback((message: MessageEnvelope) =>
@@ -111,14 +117,19 @@ export function useChatStore() {
   const userLeave = useCallback((sessionId: string) =>
     dispatch({ type: "USER_LEAVE", sessionId }), []);
 
+  const setReceiver = useCallback((receiverId: string) =>
+    dispatch({ type: "SET_RECEIVER", receiverId }), []);
+
   return {
     messages: state.messages,
     presenceMap: state.presenceMap,
+    receiverId: state.receiverId,
     receiveMessage,
     addOptimisticMessage,
     updateMessageStatus,
     syncHistory,
     userJoin,
     userLeave,
+    setReceiver,
   };
 }
