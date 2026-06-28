@@ -53,22 +53,27 @@ export const ChatView: React.FC<Props> = ({
   // Subscribe to incoming events
   useEffect(() => {
     const unsubOpen = on<ConnectionOpenPayload>("connection.open", (frame) => {
+      console.log("[ChatView] connection.open received:", frame.payload);
       setCurrentSessionId(frame.payload.sessionId);
     });
 
     const unsubReceive = on<MessageEnvelope>("message.receive", (frame) => {
+      console.log("[ChatView] message.receive received:", frame.payload);
       store.receiveMessage(frame.payload);
     });
 
     const unsubStatus = on<MessageStatusUpdatePayload>("message.status_update", (frame) => {
+      console.log("[ChatView] message.status_update received:", frame.payload);
       store.updateMessageStatus(frame.payload.messageId, frame.payload.status);
     });
 
     const unsubJoin = on<UserPresencePayload>("user.join", (frame) => {
+      console.log("[ChatView] user.join received:", frame.payload);
       store.userJoin(frame.payload.sessionId, frame.payload.userId, frame.payload.displayName);
     });
 
     const unsubLeave = on<UserPresencePayload>("user.leave", (frame) => {
+      console.log("[ChatView] user.leave received:", frame.payload);
       store.userLeave(frame.payload.sessionId);
     });
 
@@ -157,6 +162,15 @@ export const ChatView: React.FC<Props> = ({
     [on]
   );
 
+  // Diagnostic logger to help debug "empty" state
+  useEffect(() => {
+    const logInterval = setInterval(() => {
+      handleConsoleCommand("status", []);
+    }, 10000);
+    return () => clearInterval(logInterval);
+  }, [handleConsoleCommand]);
+
+
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
       {/* Chat panel */}
@@ -186,6 +200,9 @@ export const ChatView: React.FC<Props> = ({
           </span>
           <span style={{ color: "#0b93f6", fontSize: "13px", marginLeft: "12px", fontWeight: 500 }}>
             Chatting with: {store.receiverId || initialReceiverId || "None"}
+          </span>
+          <span style={{ color: "#ccc", fontSize: "10px", marginLeft: "12px", fontStyle: "italic" }}>
+            SID: {currentSessionId.substring(0, 4) || "..."}
           </span>
           <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
             {connected ? "Connected" : "Reconnecting…"}

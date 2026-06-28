@@ -98,8 +98,15 @@ export class RoomDurableObject implements DurableObject {
       connectedAt: Date.now(),
     });
 
+    // Persist session metadata to DO storage to survive restarts
+    await this.state.storage.put(`session:${sessionId}`, {
+      userId: session.userId,
+      displayName: session.displayName,
+      connectedAt: Date.now(),
+    });
+
     // Notify room of join
-    this.broadcastExcept(sessionId, {
+    await this.broadcastExcept(sessionId, {
       type: "user.join",
       frameId: crypto.randomUUID(),
       roomId,
@@ -108,7 +115,7 @@ export class RoomDurableObject implements DurableObject {
     });
 
     // Emit console event
-    this.broadcastConsole(
+    await this.broadcastConsole(
       roomId,
       "info",
       "room",
@@ -143,11 +150,23 @@ export class RoomDurableObject implements DurableObject {
 
     const sessionId: string = (ws as any).__sessionId;
     const roomId: string = (ws as any).__roomId;
-    const session = this.sessions.get(sessionId);
+    let session = this.sessions.get(sessionId);
 
     if (!session) {
-      ws.send(makeErrorFrame(ERROR_CODES.INVALID_SESSION, "Session not registered"));
-      return;
+      const meta = await this.state.storage.get<any>(`session:${sessionId}`);
+      if (meta) {
+        session = {
+          ws,
+          userId: meta.userId,
+          displayName: meta.displayName,
+          sessionId,
+          connectedAt: meta.connectedAt,
+        };
+        this.sessions.set(sessionId, session);
+      } else {
+        ws.send(makeErrorFrame(ERROR_CODES.INVALID_SESSION, "Session not registered"));
+        return;
+      }
     }
 
     let frame: WSFrame;
@@ -205,8 +224,9 @@ export class RoomDurableObject implements DurableObject {
 
     if (session) {
       this.sessions.delete(sessionId);
+      await this.state.storage.delete(`session:${sessionId}`);
 
-      this.broadcastExcept(sessionId, {
+      await this.broadcastExcept(sessionId, {
         type: "user.leave",
         frameId: crypto.randomUUID(),
         roomId,
@@ -214,7 +234,7 @@ export class RoomDurableObject implements DurableObject {
         payload: { sessionId, userId: session.userId, displayName: session.displayName },
       });
 
-      this.broadcastConsole(
+      await this.broadcastConsole(
         roomId,
         "info",
         "room",
@@ -227,7 +247,7 @@ export class RoomDurableObject implements DurableObject {
     const sessionId: string = (ws as any).__sessionId;
     const roomId: string = (ws as any).__roomId ?? "unknown";
 
-    this.broadcastConsole(roomId, "error", "room", `WebSocket error on session ${sessionId}`);
+    await this.broadcastConsole(roomId, "error", "room", `WebSocket error on session ${sessionId}`);
     this.sessions.delete(sessionId);
   }
 
@@ -256,9 +276,16 @@ export class RoomDurableObject implements DurableObject {
 
     // Send to receiver AND sender if online
     let delivered = false;
-    for (const [, s] of this.sessions) {
-      if (s.userId === receiverId || s.userId === senderSession.userId) {
-        s.ws.send(
+    const sockets = this.state.getWebSockets();
+    for (const ws of sockets) {
+      const sessionId = (ws as any).__sessionId;
+      if (!sessionId) continue;
+
+      const meta = await this.state.storage.get<any>(`session:${sessionId}`);
+      if (!meta) continue;
+
+      if (meta.userId === receiverId || meta.userId === senderSession.userId) {
+        ws.send(
           JSON.stringify({
             type: "message.receive",
             frameId: crypto.randomUUID(),
@@ -267,7 +294,7 @@ export class RoomDurableObject implements DurableObject {
             payload: envelope,
           })
         );
-        if (s.userId === receiverId) delivered = true;
+        if (meta.userId === receiverId) delivered = true;
       }
     }
 
@@ -292,7 +319,7 @@ export class RoomDurableObject implements DurableObject {
       })
     );
 
-    this.broadcastConsole(
+    await this.broadcastConsole(
       roomId,
       "debug",
       "message",
@@ -308,7 +335,7 @@ export class RoomDurableObject implements DurableObject {
 
     // Notify sender that message was read — find sender by scanning DO storage
     // (In a production system you'd maintain a messageId→senderId index in DO storage)
-    this.broadcastConsole(roomId, "debug", "ack", `ack received for ${messageId.substring(0, 8)}`);
+    await this.broadcastConsole(roomId, "debug", "ack", `ack received for ${messageId.substring(0, 8)}`);
   }
 
   private async handleSyncRequest(
@@ -340,12 +367,22 @@ export class RoomDurableObject implements DurableObject {
     // Simple CLI dispatcher
     switch (command) {
       case "status": {
+        const sockets = this.state.getWebSockets();
+        const activeUsers = [];
+        for (const ws of sockets) {
+          const sid = (ws as any).__sessionId;
+          if (sid) {
+            const meta = await this.state.storage.get<any>(`session:${sid}`);
+            if (meta) {
+              activeUsers.push(`  - ${meta.displayName} (${meta.userId.substring(0, 8)})`);
+            }
+          }
+        }
+
         const lines = [
           `Room: ${roomId}`,
-          `Connected sessions: ${this.sessions.size}`,
-          ...Array.from(this.sessions.values()).map(
-            (s) => `  - ${s.displayName} (${s.userId.substring(0, 8)}) since ${new Date(s.connectedAt).toISOString()}`
-          ),
+          `Connected sockets: ${sockets.length}`,
+          ...activeUsers,
         ];
         session.ws.send(
           JSON.stringify({
@@ -401,29 +438,32 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
-  private broadcastExcept(excludeSessionId: string, frame: WSFrame): void {
+  private async broadcastExcept(excludeSessionId: string, frame: WSFrame): Promise<void> {
     const serialized = JSON.stringify(frame);
-    for (const [sid, session] of this.sessions) {
-      if (sid !== excludeSessionId) {
+    const sockets = this.state.getWebSockets();
+    for (const ws of sockets) {
+      const sessionId = (ws as any).__sessionId;
+      if (sessionId && sessionId !== excludeSessionId) {
         try {
-          session.ws.send(serialized);
+          ws.send(serialized);
         } catch {
-          // WebSocket may be in closing state; will be cleaned up on close event
+          // WebSocket may be in closing state
         }
       }
     }
   }
 
-  private broadcastConsole(
+  private async broadcastConsole(
     roomId: string,
     level: "info" | "warn" | "error" | "debug",
     source: string,
     message: string
-  ): void {
+  ): Promise<void> {
     const frame = makeConsoleFrame(roomId, level, source, message);
-    for (const [, session] of this.sessions) {
+    const sockets = this.state.getWebSockets();
+    for (const ws of sockets) {
       try {
-        session.ws.send(frame);
+        ws.send(frame);
       } catch {
         // ignore closed sockets
       }
