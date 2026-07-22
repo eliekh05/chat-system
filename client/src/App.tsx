@@ -6,7 +6,7 @@ const WORKER_BASE_URL = import.meta.env.VITE_WORKER_URL as string;
 const DEFAULT_ROOM = "general";
 
 export default function App() {
-  const { session, createSession } = useSessionStore();
+  const { session, createSession, clearSession, savedReceiver, setSavedReceiver } = useSessionStore();
   const [userIdInput, setUserIdInput] = useState("");
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [receiverIdInput, setReceiverIdInput] = useState("");
@@ -14,7 +14,7 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeReceiverId, setActiveReceiverId] = useState<string | null>(null);
+  const [activeReceiverId, setActiveReceiverId] = useState<string | null>(savedReceiver || null);
 
   const handleJoin = useCallback(async () => {
     if (!displayNameInput.trim() || !receiverIdInput.trim()) return;
@@ -27,12 +27,21 @@ export default function App() {
         userIdInput.trim() || undefined
       );
       setActiveReceiverId(receiverIdInput.trim());
+      setSavedReceiver(receiverIdInput.trim());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to create session");
     } finally {
       setCreating(false);
     }
-  }, [displayNameInput, receiverIdInput, userIdInput, createSession]);
+  }, [displayNameInput, receiverIdInput, userIdInput, createSession, setSavedReceiver]);
+
+  const handleLogout = useCallback(() => {
+    clearSession();
+    setActiveReceiverId(null);
+    setReceiverIdInput("");
+    setUserIdInput("");
+    setDisplayNameInput("");
+  }, [clearSession]);
 
   if (session?.userId && activeReceiverId) {
     return (
@@ -43,6 +52,7 @@ export default function App() {
         userId={session.userId}
         displayName={session.displayName}
         initialReceiverId={activeReceiverId}
+        onLogout={handleLogout}
       />
     );
   }

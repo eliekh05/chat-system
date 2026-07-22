@@ -20,7 +20,7 @@ export function makeErrorFrame(
     frameId: frameId ?? crypto.randomUUID(),
     roomId: "",
     timestamp: Date.now(),
-    payload: { code, message, frameId },
+    payload: { code, message },
   });
 }
 

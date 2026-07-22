@@ -13,6 +13,7 @@ import type {
   UserPresencePayload,
   RoomSyncResponsePayload,
   ConsoleCommandPayload,
+  ErrorFramePayload,
   WSFrame,
 } from "../types.js";
 
@@ -23,6 +24,7 @@ interface Props {
   userId: string;
   displayName: string;
   initialReceiverId: string;
+  onLogout: () => void;
 }
 
 export const ChatView: React.FC<Props> = ({
@@ -32,9 +34,12 @@ export const ChatView: React.FC<Props> = ({
   userId,
   displayName,
   initialReceiverId,
+  onLogout,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentSessionId, setCurrentSessionId] = React.useState<string>("");
+  const [serverError, setServerError] = React.useState<string | null>(null);
+  const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
   const store = useChatStore();
   const { connected, send, on } = useWSClient({
     workerBaseUrl,
@@ -43,7 +48,6 @@ export const ChatView: React.FC<Props> = ({
     enabled: true,
   });
 
-  // Keep stable store actions without re-subscribing every render
   const {
     setReceiver,
     receiveMessage,
@@ -57,6 +61,21 @@ export const ChatView: React.FC<Props> = ({
     messages,
     presenceMap,
   } = store;
+
+  // Track names for userId→displayName resolution
+  const nameMapRef = useRef(nameMap);
+  nameMapRef.current = nameMap;
+
+  // Build name map from presence data
+  useEffect(() => {
+    const next = new Map(nameMapRef.current);
+    for (const [, p] of presenceMap) {
+      next.set(p.userId, p.displayName);
+    }
+    // Always include self
+    next.set(userId, displayName);
+    setNameMap(next);
+  }, [presenceMap, userId, displayName]);
 
   useEffect(() => {
     if (initialReceiverId) {
@@ -96,6 +115,11 @@ export const ChatView: React.FC<Props> = ({
       syncHistory(frame.payload.messages);
     });
 
+    const unsubError = on<ErrorFramePayload>("error.frame", (frame) => {
+      setServerError(frame.payload.message);
+      setTimeout(() => setServerError(null), 5000);
+    });
+
     return () => {
       unsubOpen();
       unsubReceive();
@@ -103,6 +127,7 @@ export const ChatView: React.FC<Props> = ({
       unsubJoin();
       unsubLeave();
       unsubSync();
+      unsubError();
     };
   }, [
     on,
@@ -186,6 +211,21 @@ export const ChatView: React.FC<Props> = ({
     [on]
   );
 
+  // Filter messages: only show messages between self and receiver
+  const filteredMessages = React.useMemo(() => {
+    if (!receiverId) return messages;
+    return messages.filter(
+      (m) =>
+        (m.senderId === userId && m.receiverId === receiverId) ||
+        (m.senderId === receiverId && m.receiverId === userId)
+    );
+  }, [messages, userId, receiverId]);
+
+  const resolveName = useCallback(
+    (id: string) => nameMapRef.current.get(id) || id.substring(0, 8),
+    []
+  );
+
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", borderRight: "1px solid #ddd" }}>
@@ -213,12 +253,41 @@ export const ChatView: React.FC<Props> = ({
             {displayName} ({userId || "Unknown"})
           </span>
           <span style={{ color: "#0b93f6", fontSize: "13px", fontWeight: 500 }}>
-            Chatting with: {receiverId || initialReceiverId || "None"}
+            Chatting with: {resolveName(receiverId || initialReceiverId)}
           </span>
           <span style={{ color: "#888", fontSize: "13px" }}>
             {connected ? "Connected" : "Reconnecting…"}
           </span>
+          <button
+            onClick={onLogout}
+            style={{
+              marginLeft: "auto",
+              padding: "4px 12px",
+              fontSize: "12px",
+              border: "1px solid #ddd",
+              borderRadius: "6px",
+              backgroundColor: "#fff",
+              cursor: "pointer",
+              color: "#666",
+            }}
+          >
+            Logout
+          </button>
         </div>
+
+        {serverError && (
+          <div
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#ffebee",
+              borderBottom: "1px solid #f44336",
+              color: "#c62828",
+              fontSize: "13px",
+            }}
+          >
+            Server: {serverError}
+          </div>
+        )}
 
         <PresenceBar presenceMap={presenceMap} currentSessionId={currentSessionId} />
 
@@ -231,11 +300,12 @@ export const ChatView: React.FC<Props> = ({
             backgroundColor: "#fff",
           }}
         >
-          {messages.map((msg) => (
+          {filteredMessages.map((msg) => (
             <MessageBubble
               key={msg.messageId}
               message={msg}
               isSelf={msg.senderId === userId}
+              senderDisplayName={resolveName(msg.senderId)}
               onReply={(id) => setReceiver(id)}
             />
           ))}

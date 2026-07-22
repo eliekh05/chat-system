@@ -41,10 +41,18 @@ export default {
         );
       }
 
+      const trimmedName = body.displayName.trim().substring(0, 32);
+      if (!trimmedName) {
+        return new Response(
+          JSON.stringify({ error: "displayName cannot be empty" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       const session = await createSession(
         env.CHAT_KV,
-        body.displayName.trim().substring(0, 32),
-        typeof body.userId === "string" ? body.userId.trim() || undefined : undefined
+        trimmedName,
+        typeof body.userId === "string" ? body.userId.trim().substring(0, 64) || undefined : undefined
       );
       return new Response(JSON.stringify(session), {
         status: 201,

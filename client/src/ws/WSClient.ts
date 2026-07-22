@@ -160,6 +160,7 @@ export class WSClient {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
       console.error("[WSClient] Max reconnect attempts reached");
+      this.frameQueue = [];
       return;
     }
 

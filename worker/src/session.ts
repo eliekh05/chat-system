@@ -9,14 +9,16 @@ export async function createSession(
   displayName: string,
   userId?: string
 ): Promise<SessionRecord> {
-  const finalUserId = userId || crypto.randomUUID();
+  const trimmedName = displayName.trim().substring(0, 32);
+  if (!trimmedName) throw new Error("displayName is required");
+  const finalUserId = (userId || crypto.randomUUID()).trim().substring(0, 64);
   const sessionToken = crypto.randomUUID();
   const now = Date.now();
 
   const record: SessionRecord = {
     userId: finalUserId,
     sessionToken,
-    displayName,
+    displayName: trimmedName,
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS,
   };

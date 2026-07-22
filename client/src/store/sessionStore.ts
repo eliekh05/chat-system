@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { SessionRecord } from "../types.js";
 
 const STORAGE_KEY = "chat_session";
+const RECEIVER_KEY = "chat_receiver";
 
 export function useSessionStore() {
   const [session, setSession] = useState<SessionRecord | null>(() => {
@@ -11,13 +12,28 @@ export function useSessionStore() {
       const s: SessionRecord = JSON.parse(raw);
       if (Date.now() > s.expiresAt) {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(RECEIVER_KEY);
         return null;
       }
       return s;
     } catch {
+      localStorage.removeItem(STORAGE_KEY);
       return null;
     }
   });
+
+  // Periodically check if session expired
+  useEffect(() => {
+    if (!session) return;
+    const check = setInterval(() => {
+      if (Date.now() > session.expiresAt) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(RECEIVER_KEY);
+        setSession(null);
+      }
+    }, 60_000); // check every minute
+    return () => clearInterval(check);
+  }, [session]);
 
   const createSession = useCallback(async (
     workerBaseUrl: string,
@@ -42,8 +58,15 @@ export function useSessionStore() {
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(RECEIVER_KEY);
     setSession(null);
   }, []);
 
-  return { session, createSession, clearSession };
+  const savedReceiver = localStorage.getItem(RECEIVER_KEY) || "";
+
+  const setSavedReceiver = useCallback((receiverId: string) => {
+    localStorage.setItem(RECEIVER_KEY, receiverId);
+  }, []);
+
+  return { session, createSession, clearSession, savedReceiver, setSavedReceiver };
 }

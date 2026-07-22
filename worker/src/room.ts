@@ -324,6 +324,11 @@ export class RoomDurableObject implements DurableObject {
   ): Promise<void> {
     const { receiverId, body, clientTimestamp } = frame.payload;
 
+    if (!body || typeof body !== "string" || body.length > 10000) {
+      senderSession.ws.send(makeErrorFrame(ERROR_CODES.MALFORMED_FRAME, "Invalid message body"));
+      return;
+    }
+
     const envelope: MessageEnvelope = {
       messageId: crypto.randomUUID(),
       senderId: senderSession.userId,
@@ -364,7 +369,9 @@ export class RoomDurableObject implements DurableObject {
 
     envelope.status = delivered ? "delivered" : "sent";
 
-    this.env.CHAT_KV && persistMessage(this.env.CHAT_KV, envelope).catch(() => {});
+    this.env.CHAT_KV && persistMessage(this.env.CHAT_KV, envelope).catch((e: unknown) => {
+      console.error(`[Room] KV persist failed: ${e}`);
+    });
 
     senderSession.ws.send(
       JSON.stringify({

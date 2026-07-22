@@ -4,6 +4,7 @@ import type { MessageEnvelope } from "../types.js";
 interface Props {
   message: MessageEnvelope;
   isSelf: boolean;
+  senderDisplayName?: string;
   onReply?: (userId: string) => void;
 }
 
@@ -15,7 +16,7 @@ const STATUS_SYMBOLS: Record<string, string> = {
   failed: "✗",
 };
 
-export const MessageBubble: React.FC<Props> = ({ message, isSelf, onReply }) => {
+export const MessageBubble: React.FC<Props> = ({ message, isSelf, senderDisplayName, onReply }) => {
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -41,7 +42,7 @@ export const MessageBubble: React.FC<Props> = ({ message, isSelf, onReply }) => 
             userSelect: "none",
           }}
         >
-          {message.senderId} {onReply ? " (Click to reply)" : ""}
+          {senderDisplayName || message.senderId.substring(0, 8)} {onReply ? " (Click to reply)" : ""}
         </div>
       )}
       <div
