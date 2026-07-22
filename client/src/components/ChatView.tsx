@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useCallback } from "react";
 import { MessageBubble } from "./MessageBubble.js";
 import { MessageInput } from "./MessageInput.js";
 import { PresenceBar } from "./PresenceBar.js";
-import { ConsolePanel } from "./ConsolePanel.js";
 import { useWSClient } from "../ws/useWSClient.js";
 import { useChatStore } from "../store/chatStore.js";
 import type {
@@ -12,9 +11,7 @@ import type {
   MessageStatusUpdatePayload,
   UserPresencePayload,
   RoomSyncResponsePayload,
-  ConsoleCommandPayload,
   ErrorFramePayload,
-  WSFrame,
 } from "../types.js";
 
 interface Props {
@@ -192,25 +189,6 @@ export const ChatView: React.FC<Props> = ({
     [send, addOptimisticMessage, userId, receiverId, roomId]
   );
 
-  const handleConsoleCommand = useCallback(
-    (command: string, args: string[]) => {
-      send<ConsoleCommandPayload>({
-        type: "console.command",
-        frameId: crypto.randomUUID(),
-        roomId,
-        payload: { command, args },
-      });
-    },
-    [send, roomId]
-  );
-
-  const handleConsoleFrame = useCallback(
-    (handler: (frame: WSFrame<unknown>) => void): (() => void) => {
-      return on("console.event", handler);
-    },
-    [on]
-  );
-
   // Filter messages: only show messages between self and receiver
   const filteredMessages = React.useMemo(() => {
     if (!receiverId) return messages;
@@ -227,8 +205,8 @@ export const ChatView: React.FC<Props> = ({
   );
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", borderRight: "1px solid #ddd" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <div
           style={{
             padding: "12px 16px",
@@ -312,27 +290,6 @@ export const ChatView: React.FC<Props> = ({
         </div>
 
         <MessageInput onSend={handleSend} disabled={!connected} />
-      </div>
-
-      <div style={{ width: "420px", display: "flex", flexDirection: "column" }}>
-        <div
-          style={{
-            padding: "8px 12px",
-            backgroundColor: "#1e1e1e",
-            color: "#888",
-            fontSize: "12px",
-            borderBottom: "1px solid #333",
-          }}
-        >
-          Developer Console
-        </div>
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <ConsolePanel
-            onCommand={handleConsoleCommand}
-            onFrame={handleConsoleFrame}
-            roomId={roomId}
-          />
-        </div>
       </div>
     </div>
   );
