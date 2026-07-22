@@ -3,43 +3,77 @@ import type {
   MessageEnvelope,
   MessageSendPayload,
   MessageAckPayload,
-  ConnectionOpenPayload,
   RoomSyncRequestPayload,
   ConsoleCommandPayload,
   SessionRecord,
+  UserPresencePayload,
 } from "./schemas.js";
 import { makeErrorFrame, ERROR_CODES } from "./errors.js";
 import { makeConsoleFrame } from "./console.js";
 import { persistMessage, getHistory } from "./history.js";
+
+export interface Env {
+  CHAT_KV: KVNamespace;
+  ROOM: DurableObjectNamespace;
+}
+
+interface SessionAttachment {
+  sessionId: string;
+  userId: string;
+  displayName: string;
+  roomId: string;
+  connectedAt: number;
+}
 
 interface ConnectedSession {
   ws: WebSocket;
   userId: string;
   displayName: string;
   sessionId: string;
+  roomId: string;
   connectedAt: number;
+}
+
+function readAttachment(ws: WebSocket): SessionAttachment | null {
+  try {
+    return (ws.deserializeAttachment() as SessionAttachment | null) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export class RoomDurableObject implements DurableObject {
   private state: DurableObjectState;
   private env: Env;
-  // Map from sessionId → ConnectedSession
+  /** In-memory map rebuilt after hibernation from WebSocket attachments. */
   private sessions: Map<string, ConnectedSession> = new Map();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
+
+    // Restore session map after hibernation — custom WS properties are lost.
+    for (const ws of this.state.getWebSockets()) {
+      const meta = readAttachment(ws);
+      if (!meta) continue;
+      this.sessions.set(meta.sessionId, {
+        ws,
+        userId: meta.userId,
+        displayName: meta.displayName,
+        sessionId: meta.sessionId,
+        roomId: meta.roomId,
+        connectedAt: meta.connectedAt,
+      });
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // WebSocket upgrade path
     if (request.headers.get("Upgrade") === "websocket") {
       return this.handleWebSocketUpgrade(request, url);
     }
 
-    // Internal HTTP: room history endpoint
     if (url.pathname.endsWith("/history")) {
       const since = Number(url.searchParams.get("since") ?? "0");
       const roomId = url.searchParams.get("roomId") ?? "";
@@ -63,7 +97,6 @@ export class RoomDurableObject implements DurableObject {
       return new Response("Missing token or roomId", { status: 400 });
     }
 
-    // Validate session via KV
     const sessionRaw = await this.env.CHAT_KV.get(`session:${sessionToken}`);
     if (!sessionRaw) {
       return new Response("Invalid session", { status: 401 });
@@ -74,55 +107,64 @@ export class RoomDurableObject implements DurableObject {
       return new Response("Session expired", { status: 401 });
     }
 
-    // Create WebSocket pair
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
 
-    // Accept on the server side
     this.state.acceptWebSocket(server);
 
     const sessionId = crypto.randomUUID();
+    const connectedAt = Date.now();
+    const attachment: SessionAttachment = {
+      sessionId,
+      userId: session.userId,
+      displayName: session.displayName,
+      roomId,
+      connectedAt,
+    };
 
-    // Store on server WebSocket for retrieval in handlers
-    (server as any).__sessionId = sessionId;
-    (server as any).__userId = session.userId;
-    (server as any).__displayName = session.displayName;
-    (server as any).__roomId = roomId;
+    // Survives Durable Object hibernation (unlike custom WS properties).
+    server.serializeAttachment(attachment);
 
-    // Register session
     this.sessions.set(sessionId, {
       ws: server,
       userId: session.userId,
       displayName: session.displayName,
       sessionId,
-      connectedAt: Date.now(),
+      roomId,
+      connectedAt,
     });
 
-    // Persist session metadata to DO storage to survive restarts
-    await this.state.storage.put(`session:${sessionId}`, {
-      userId: session.userId,
-      displayName: session.displayName,
-      connectedAt: Date.now(),
-    });
+    // Presence snapshot for the joiner (everyone already in the room)
+    const presence: UserPresencePayload[] = [];
+    for (const s of this.sessions.values()) {
+      if (s.sessionId === sessionId) continue;
+      if (s.roomId !== roomId) continue;
+      presence.push({
+        sessionId: s.sessionId,
+        userId: s.userId,
+        displayName: s.displayName,
+      });
+    }
 
-    // Notify room of join
-    await this.broadcastExcept(sessionId, {
+    this.broadcastExcept(sessionId, {
       type: "user.join",
       frameId: crypto.randomUUID(),
       roomId,
       timestamp: Date.now(),
-      payload: { sessionId, userId: session.userId, displayName: session.displayName },
+      payload: {
+        sessionId,
+        userId: session.userId,
+        displayName: session.displayName,
+      },
     });
 
-    // Emit console event
-    await this.broadcastConsole(
+    this.broadcastConsole(
       roomId,
       "info",
       "room",
       `${session.displayName} connected (${sessionId.substring(0, 8)})`
     );
 
-    // Send connection.open ack to newly connected client
     server.send(
       JSON.stringify({
         type: "connection.open",
@@ -134,6 +176,7 @@ export class RoomDurableObject implements DurableObject {
           userId: session.userId,
           displayName: session.displayName,
           protocolVersion: 1,
+          presence,
         },
       })
     );
@@ -144,30 +187,38 @@ export class RoomDurableObject implements DurableObject {
     });
   }
 
-  // CF Durable Objects WebSocket event handlers
-  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== "string") return; // binary not supported in this protocol
+  private resolveSession(ws: WebSocket): ConnectedSession | null {
+    const meta = readAttachment(ws);
+    if (!meta) return null;
 
-    const sessionId: string = (ws as any).__sessionId;
-    const roomId: string = (ws as any).__roomId;
-    let session = this.sessions.get(sessionId);
-
+    let session = this.sessions.get(meta.sessionId);
     if (!session) {
-      const meta = await this.state.storage.get<any>(`session:${sessionId}`);
-      if (meta) {
-        session = {
-          ws,
-          userId: meta.userId,
-          displayName: meta.displayName,
-          sessionId,
-          connectedAt: meta.connectedAt,
-        };
-        this.sessions.set(sessionId, session);
-      } else {
-        ws.send(makeErrorFrame(ERROR_CODES.INVALID_SESSION, "Session not registered"));
-        return;
-      }
+      session = {
+        ws,
+        userId: meta.userId,
+        displayName: meta.displayName,
+        sessionId: meta.sessionId,
+        roomId: meta.roomId,
+        connectedAt: meta.connectedAt,
+      };
+      this.sessions.set(meta.sessionId, session);
+    } else {
+      // WS object identity can change after wake — keep map pointed at live socket.
+      session.ws = ws;
     }
+    return session;
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message !== "string") return;
+
+    const session = this.resolveSession(ws);
+    if (!session) {
+      ws.send(makeErrorFrame(ERROR_CODES.INVALID_SESSION, "Session not registered"));
+      return;
+    }
+
+    const roomId = session.roomId;
 
     let frame: WSFrame;
     try {
@@ -203,7 +254,11 @@ export class RoomDurableObject implements DurableObject {
         break;
 
       case "console.command":
-        await this.handleConsoleCommand(frame as WSFrame<ConsoleCommandPayload>, session, roomId);
+        await this.handleConsoleCommand(
+          frame as WSFrame<ConsoleCommandPayload>,
+          session,
+          roomId
+        );
         break;
 
       default:
@@ -217,38 +272,49 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
-  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
-    const sessionId: string = (ws as any).__sessionId;
-    const roomId: string = (ws as any).__roomId;
-    const session = this.sessions.get(sessionId);
+  async webSocketClose(ws: WebSocket, code: number, _reason: string): Promise<void> {
+    const meta = readAttachment(ws);
+    if (!meta) return;
 
-    if (session) {
-      this.sessions.delete(sessionId);
-      await this.state.storage.delete(`session:${sessionId}`);
+    const session = this.sessions.get(meta.sessionId);
+    this.sessions.delete(meta.sessionId);
 
-      await this.broadcastExcept(sessionId, {
+    if (session || meta) {
+      const displayName = session?.displayName ?? meta.displayName;
+      const roomId = session?.roomId ?? meta.roomId;
+
+      this.broadcastExcept(meta.sessionId, {
         type: "user.leave",
         frameId: crypto.randomUUID(),
         roomId,
         timestamp: Date.now(),
-        payload: { sessionId, userId: session.userId, displayName: session.displayName },
+        payload: {
+          sessionId: meta.sessionId,
+          userId: meta.userId,
+          displayName,
+        },
       });
 
-      await this.broadcastConsole(
+      this.broadcastConsole(
         roomId,
         "info",
         "room",
-        `${session.displayName} disconnected (code=${code})`
+        `${displayName} disconnected (code=${code})`
       );
     }
   }
 
-  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
-    const sessionId: string = (ws as any).__sessionId;
-    const roomId: string = (ws as any).__roomId ?? "unknown";
-
-    await this.broadcastConsole(roomId, "error", "room", `WebSocket error on session ${sessionId}`);
-    this.sessions.delete(sessionId);
+  async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+    const meta = readAttachment(ws);
+    if (meta) {
+      this.sessions.delete(meta.sessionId);
+      this.broadcastConsole(
+        meta.roomId,
+        "error",
+        "room",
+        `WebSocket error on session ${meta.sessionId}`
+      );
+    }
   }
 
   private async handleMessageSend(
@@ -274,18 +340,14 @@ export class RoomDurableObject implements DurableObject {
       },
     };
 
-    // Send to receiver AND sender if online
     let delivered = false;
-    const sockets = this.state.getWebSockets();
-    for (const ws of sockets) {
-      const sessionId = (ws as any).__sessionId;
-      if (!sessionId) continue;
 
-      const meta = await this.state.storage.get<any>(`session:${sessionId}`);
-      if (!meta) continue;
+    for (const s of this.sessions.values()) {
+      if (s.roomId !== roomId) continue;
+      if (s.userId !== receiverId && s.userId !== senderSession.userId) continue;
 
-      if (meta.userId === receiverId || meta.userId === senderSession.userId) {
-        ws.send(
+      try {
+        s.ws.send(
           JSON.stringify({
             type: "message.receive",
             frameId: crypto.randomUUID(),
@@ -294,17 +356,16 @@ export class RoomDurableObject implements DurableObject {
             payload: envelope,
           })
         );
-        if (meta.userId === receiverId) delivered = true;
+        if (s.userId === receiverId) delivered = true;
+      } catch {
+        // closed socket; cleaned up on close
       }
     }
 
-    // Update status based on delivery
     envelope.status = delivered ? "delivered" : "sent";
 
-    // Persist to KV (async — do not await to avoid blocking)
     this.env.CHAT_KV && persistMessage(this.env.CHAT_KV, envelope).catch(() => {});
 
-    // Ack back to sender
     senderSession.ws.send(
       JSON.stringify({
         type: "message.status_update",
@@ -319,7 +380,7 @@ export class RoomDurableObject implements DurableObject {
       })
     );
 
-    await this.broadcastConsole(
+    this.broadcastConsole(
       roomId,
       "debug",
       "message",
@@ -332,10 +393,12 @@ export class RoomDurableObject implements DurableObject {
     roomId: string
   ): Promise<void> {
     const { messageId } = frame.payload;
-
-    // Notify sender that message was read — find sender by scanning DO storage
-    // (In a production system you'd maintain a messageId→senderId index in DO storage)
-    await this.broadcastConsole(roomId, "debug", "ack", `ack received for ${messageId.substring(0, 8)}`);
+    this.broadcastConsole(
+      roomId,
+      "debug",
+      "ack",
+      `ack received for ${messageId.substring(0, 8)}`
+    );
   }
 
   private async handleSyncRequest(
@@ -362,26 +425,20 @@ export class RoomDurableObject implements DurableObject {
     session: ConnectedSession,
     roomId: string
   ): Promise<void> {
-    const { command, args } = frame.payload;
+    const { command } = frame.payload;
 
-    // Simple CLI dispatcher
     switch (command) {
       case "status": {
-        const sockets = this.state.getWebSockets();
-        const activeUsers = [];
-        for (const ws of sockets) {
-          const sid = (ws as any).__sessionId;
-          if (sid) {
-            const meta = await this.state.storage.get<any>(`session:${sid}`);
-            if (meta) {
-              activeUsers.push(`  - ${meta.displayName} (${meta.userId.substring(0, 8)})`);
-            }
-          }
-        }
+        const activeUsers = Array.from(this.sessions.values())
+          .filter((s) => s.roomId === roomId)
+          .map(
+            (s) =>
+              `  - ${s.displayName} (${s.userId.substring(0, 8)}) since ${new Date(s.connectedAt).toISOString()}`
+          );
 
         const lines = [
           `Room: ${roomId}`,
-          `Connected sockets: ${sockets.length}`,
+          `Connected sessions: ${activeUsers.length}`,
           ...activeUsers,
         ];
         session.ws.send(
@@ -438,32 +495,30 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
-  private async broadcastExcept(excludeSessionId: string, frame: WSFrame): Promise<void> {
+  private broadcastExcept(excludeSessionId: string, frame: WSFrame): void {
     const serialized = JSON.stringify(frame);
-    const sockets = this.state.getWebSockets();
-    for (const ws of sockets) {
-      const sessionId = (ws as any).__sessionId;
-      if (sessionId && sessionId !== excludeSessionId) {
-        try {
-          ws.send(serialized);
-        } catch {
-          // WebSocket may be in closing state
-        }
+    for (const [sid, session] of this.sessions) {
+      if (sid === excludeSessionId) continue;
+      if (session.roomId !== frame.roomId) continue;
+      try {
+        session.ws.send(serialized);
+      } catch {
+        // WebSocket may be closing
       }
     }
   }
 
-  private async broadcastConsole(
+  private broadcastConsole(
     roomId: string,
     level: "info" | "warn" | "error" | "debug",
     source: string,
     message: string
-  ): Promise<void> {
+  ): void {
     const frame = makeConsoleFrame(roomId, level, source, message);
-    const sockets = this.state.getWebSockets();
-    for (const ws of sockets) {
+    for (const session of this.sessions.values()) {
+      if (session.roomId !== roomId) continue;
       try {
-        ws.send(frame);
+        session.ws.send(frame);
       } catch {
         // ignore closed sockets
       }

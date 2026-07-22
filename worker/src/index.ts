@@ -1,14 +1,10 @@
 import { RoomDurableObject } from "./room.js";
+import type { Env } from "./room.js";
 import { createSession, validateSession } from "./session.js";
 import { getHistory } from "./history.js";
-import { makeErrorFrame, ERROR_CODES } from "./errors.js";
 
 export { RoomDurableObject };
-
-export interface Env {
-  CHAT_KV: KVNamespace;
-  ROOM: DurableObjectNamespace;
-}
+export type { Env };
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -28,7 +24,7 @@ export default {
 
     // ── Route: POST /api/session/create ──────────────────────────────────────
     if (path === "/api/session/create" && request.method === "POST") {
-      let body: { displayName?: string };
+      let body: { displayName?: string; userId?: string };
       try {
         body = await request.json();
       } catch {
@@ -48,7 +44,7 @@ export default {
       const session = await createSession(
         env.CHAT_KV,
         body.displayName.trim().substring(0, 32),
-        body.userId?.trim()
+        typeof body.userId === "string" ? body.userId.trim() || undefined : undefined
       );
       return new Response(JSON.stringify(session), {
         status: 201,

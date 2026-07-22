@@ -52,11 +52,19 @@ export interface WSFrame<T = unknown> {
   payload: T;
 }
 
+export interface UserPresencePayload {
+  sessionId: string;
+  userId: string;
+  displayName: string;
+}
+
 export interface ConnectionOpenPayload {
   sessionId: string;
   userId: string;
   displayName: string;
   protocolVersion: number;
+  /** Users already present in the room when this connection opened. */
+  presence?: UserPresencePayload[];
 }
 
 export interface MessageSendPayload {
@@ -74,12 +82,6 @@ export interface MessageStatusUpdatePayload {
   optimisticId: string;
   messageId: string;
   status: MessageStatus;
-}
-
-export interface UserPresencePayload {
-  sessionId: string;
-  userId: string;
-  displayName: string;
 }
 
 export interface RoomSyncRequestPayload {

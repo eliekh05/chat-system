@@ -9,12 +9,18 @@ interface ChatState {
 
 type ChatAction =
   | { type: "MESSAGE_RECEIVE"; message: MessageEnvelope }
-  | { type: "MESSAGE_STATUS_UPDATE"; messageId: string; status: MessageStatus; optimisticId: string }
+  | {
+      type: "MESSAGE_STATUS_UPDATE";
+      messageId: string;
+      status: MessageStatus;
+      optimisticId?: string;
+    }
   | { type: "MESSAGE_OPTIMISTIC"; message: MessageEnvelope }
   | { type: "SYNC_HISTORY"; messages: MessageEnvelope[] }
   | { type: "USER_JOIN"; sessionId: string; userId: string; displayName: string }
   | { type: "USER_LEAVE"; sessionId: string }
-  | { type: "SET_RECEIVER"; receiverId: string };
+  | { type: "SET_RECEIVER"; receiverId: string }
+  | { type: "PRESENCE_SYNC"; users: { sessionId: string; userId: string; displayName: string }[] };
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
@@ -53,13 +59,15 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "MESSAGE_STATUS_UPDATE": {
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.metadata.optimisticId === action.optimisticId
-            ? { ...m, messageId: action.messageId, status: action.status }
-            : m.messageId === action.messageId
-            ? { ...m, status: action.status }
-            : m
-        ),
+        messages: state.messages.map((m) => {
+          if (action.optimisticId && m.metadata.optimisticId === action.optimisticId) {
+            return { ...m, messageId: action.messageId, status: action.status };
+          }
+          if (m.messageId === action.messageId) {
+            return { ...m, status: action.status };
+          }
+          return m;
+        }),
       };
     }
 
@@ -83,6 +91,15 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       next.delete(action.sessionId);
       return { ...state, presenceMap: next };
     }
+
+    case "PRESENCE_SYNC": {
+      const next = new Map(state.presenceMap);
+      for (const user of action.users) {
+        next.set(user.sessionId, user);
+      }
+      return { ...state, presenceMap: next };
+    }
+
     case "SET_RECEIVER": {
       return { ...state, receiverId: action.receiverId };
     }
@@ -105,8 +122,11 @@ export function useChatStore() {
   const addOptimisticMessage = useCallback((message: MessageEnvelope) =>
     dispatch({ type: "MESSAGE_OPTIMISTIC", message }), []);
 
-  const updateMessageStatus = useCallback((messageId: string, status: MessageStatus) =>
-    dispatch({ type: "MESSAGE_STATUS_UPDATE", messageId, status }), []);
+  const updateMessageStatus = useCallback(
+    (messageId: string, status: MessageStatus, optimisticId?: string) =>
+      dispatch({ type: "MESSAGE_STATUS_UPDATE", messageId, status, optimisticId }),
+    []
+  );
 
   const syncHistory = useCallback((messages: MessageEnvelope[]) =>
     dispatch({ type: "SYNC_HISTORY", messages }), []);
@@ -116,6 +136,12 @@ export function useChatStore() {
 
   const userLeave = useCallback((sessionId: string) =>
     dispatch({ type: "USER_LEAVE", sessionId }), []);
+
+  const syncPresence = useCallback(
+    (users: { sessionId: string; userId: string; displayName: string }[]) =>
+      dispatch({ type: "PRESENCE_SYNC", users }),
+    []
+  );
 
   const setReceiver = useCallback((receiverId: string) =>
     dispatch({ type: "SET_RECEIVER", receiverId }), []);
@@ -130,6 +156,7 @@ export function useChatStore() {
     syncHistory,
     userJoin,
     userLeave,
+    syncPresence,
     setReceiver,
   };
 }

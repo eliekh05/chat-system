@@ -6,6 +6,7 @@ import { ConsolePanel } from "./ConsolePanel.js";
 import { useWSClient } from "../ws/useWSClient.js";
 import { useChatStore } from "../store/chatStore.js";
 import type {
+  ConnectionOpenPayload,
   MessageEnvelope,
   MessageSendPayload,
   MessageStatusUpdatePayload,
@@ -32,7 +33,6 @@ export const ChatView: React.FC<Props> = ({
   displayName,
   initialReceiverId,
 }) => {
-  console.log("[ChatView] userId prop:", userId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentSessionId, setCurrentSessionId] = React.useState<string>("");
   const store = useChatStore();
@@ -43,42 +43,57 @@ export const ChatView: React.FC<Props> = ({
     enabled: true,
   });
 
-  // Initialize receiver
+  // Keep stable store actions without re-subscribing every render
+  const {
+    setReceiver,
+    receiveMessage,
+    updateMessageStatus,
+    userJoin,
+    userLeave,
+    syncHistory,
+    syncPresence,
+    addOptimisticMessage,
+    receiverId,
+    messages,
+    presenceMap,
+  } = store;
+
   useEffect(() => {
     if (initialReceiverId) {
-      store.setReceiver(initialReceiverId);
+      setReceiver(initialReceiverId);
     }
-  }, [initialReceiverId, store]);
+  }, [initialReceiverId, setReceiver]);
 
-  // Subscribe to incoming events
   useEffect(() => {
     const unsubOpen = on<ConnectionOpenPayload>("connection.open", (frame) => {
-      console.log("[ChatView] connection.open received:", frame.payload);
       setCurrentSessionId(frame.payload.sessionId);
+      if (frame.payload.presence?.length) {
+        syncPresence(frame.payload.presence);
+      }
     });
 
     const unsubReceive = on<MessageEnvelope>("message.receive", (frame) => {
-      console.log("[ChatView] message.receive received:", frame.payload);
-      store.receiveMessage(frame.payload);
+      receiveMessage(frame.payload);
     });
 
     const unsubStatus = on<MessageStatusUpdatePayload>("message.status_update", (frame) => {
-      console.log("[ChatView] message.status_update received:", frame.payload);
-      store.updateMessageStatus(frame.payload.messageId, frame.payload.status);
+      updateMessageStatus(
+        frame.payload.messageId,
+        frame.payload.status,
+        frame.payload.optimisticId
+      );
     });
 
     const unsubJoin = on<UserPresencePayload>("user.join", (frame) => {
-      console.log("[ChatView] user.join received:", frame.payload);
-      store.userJoin(frame.payload.sessionId, frame.payload.userId, frame.payload.displayName);
+      userJoin(frame.payload.sessionId, frame.payload.userId, frame.payload.displayName);
     });
 
     const unsubLeave = on<UserPresencePayload>("user.leave", (frame) => {
-      console.log("[ChatView] user.leave received:", frame.payload);
-      store.userLeave(frame.payload.sessionId);
+      userLeave(frame.payload.sessionId);
     });
 
     const unsubSync = on<RoomSyncResponsePayload>("room.sync_response", (frame) => {
-      store.syncHistory(frame.payload.messages);
+      syncHistory(frame.payload.messages);
     });
 
     return () => {
@@ -89,38 +104,42 @@ export const ChatView: React.FC<Props> = ({
       unsubLeave();
       unsubSync();
     };
-  }, [on, store]);
+  }, [
+    on,
+    receiveMessage,
+    updateMessageStatus,
+    userJoin,
+    userLeave,
+    syncHistory,
+    syncPresence,
+  ]);
 
-  // Request sync when connected
   useEffect(() => {
     if (!connected) return;
     send({
       type: "room.sync_request",
       frameId: crypto.randomUUID(),
       roomId,
-      payload: { since: Date.now() - 60 * 60 * 1000 }, // Last hour
+      payload: { since: Date.now() - 60 * 60 * 1000 },
     });
   }, [connected, send, roomId]);
 
-  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [store.messages]);
+  }, [messages]);
 
   const handleSend = useCallback(
     (body: string) => {
       const optimisticId = crypto.randomUUID();
       const now = Date.now();
-      const receiverId = store.receiverId;
 
       if (!receiverId) {
         alert("No receiver selected!");
         return;
       }
 
-      // Optimistic message for instant UI feedback
       const optimistic: MessageEnvelope = {
         messageId: optimisticId,
         senderId: userId,
@@ -129,9 +148,14 @@ export const ChatView: React.FC<Props> = ({
         timestamp: now,
         payload: { type: "text", body },
         status: "sending",
-        metadata: { clientTimestamp: now, sessionId: "", optimisticId: optimisticId, version: 1 },
+        metadata: {
+          clientTimestamp: now,
+          sessionId: "",
+          optimisticId,
+          version: 1,
+        },
       };
-      store.addOptimisticMessage(optimistic);
+      addOptimisticMessage(optimistic);
 
       send<MessageSendPayload>({
         type: "message.send",
@@ -140,7 +164,7 @@ export const ChatView: React.FC<Props> = ({
         payload: { receiverId, body, clientTimestamp: now },
       });
     },
-    [send, store, userId, roomId]
+    [send, addOptimisticMessage, userId, receiverId, roomId]
   );
 
   const handleConsoleCommand = useCallback(
@@ -162,20 +186,9 @@ export const ChatView: React.FC<Props> = ({
     [on]
   );
 
-  // Diagnostic logger to help debug "empty" state
-  useEffect(() => {
-    const logInterval = setInterval(() => {
-      handleConsoleCommand("status", []);
-    }, 10000);
-    return () => clearInterval(logInterval);
-  }, [handleConsoleCommand]);
-
-
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      {/* Chat panel */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", borderRight: "1px solid #ddd" }}>
-        {/* Header */}
         <div
           style={{
             padding: "12px 16px",
@@ -184,6 +197,7 @@ export const ChatView: React.FC<Props> = ({
             display: "flex",
             alignItems: "center",
             gap: "12px",
+            flexWrap: "wrap",
           }}
         >
           <div
@@ -195,23 +209,19 @@ export const ChatView: React.FC<Props> = ({
             }}
           />
           <span style={{ fontWeight: 600 }}>Room: {roomId}</span>
-          <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
-            My ID: {userId || "Unknown"}
+          <span style={{ color: "#888", fontSize: "13px" }}>
+            {displayName} ({userId || "Unknown"})
           </span>
-          <span style={{ color: "#0b93f6", fontSize: "13px", marginLeft: "12px", fontWeight: 500 }}>
-            Chatting with: {store.receiverId || initialReceiverId || "None"}
+          <span style={{ color: "#0b93f6", fontSize: "13px", fontWeight: 500 }}>
+            Chatting with: {receiverId || initialReceiverId || "None"}
           </span>
-          <span style={{ color: "#ccc", fontSize: "10px", marginLeft: "12px", fontStyle: "italic" }}>
-            SID: {currentSessionId.substring(0, 4) || "..."}
-          </span>
-          <span style={{ color: "#888", fontSize: "13px", marginLeft: "12px" }}>
+          <span style={{ color: "#888", fontSize: "13px" }}>
             {connected ? "Connected" : "Reconnecting…"}
           </span>
         </div>
 
-        <PresenceBar presenceMap={store.presenceMap} currentSessionId={currentSessionId} />
+        <PresenceBar presenceMap={presenceMap} currentSessionId={currentSessionId} />
 
-        {/* Message thread */}
         <div
           ref={scrollRef}
           style={{
@@ -221,12 +231,12 @@ export const ChatView: React.FC<Props> = ({
             backgroundColor: "#fff",
           }}
         >
-          {store.messages.map((msg) => (
+          {messages.map((msg) => (
             <MessageBubble
               key={msg.messageId}
               message={msg}
               isSelf={msg.senderId === userId}
-              onReply={(id) => store.setReceiver(id)}
+              onReply={(id) => setReceiver(id)}
             />
           ))}
         </div>
@@ -234,7 +244,6 @@ export const ChatView: React.FC<Props> = ({
         <MessageInput onSend={handleSend} disabled={!connected} />
       </div>
 
-      {/* xterm.js console panel */}
       <div style={{ width: "420px", display: "flex", flexDirection: "column" }}>
         <div
           style={{

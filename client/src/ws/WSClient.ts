@@ -1,4 +1,4 @@
-import type { WSFrame, WSFrameType } from "../types.js";
+import type { ConnectionOpenPayload, WSFrame, WSFrameType } from "../types.js";
 
 type FrameHandler<T = unknown> = (frame: WSFrame<T>) => void;
 
@@ -64,13 +64,13 @@ export class WSClient {
 
     // If the handler is for connection.open and we already have the payload, fire it immediately
     if (type === "connection.open" && this.lastOpenPayload) {
-      handler({
+      (handler as FrameHandler<ConnectionOpenPayload>)({
         type: "connection.open",
         frameId: "cached",
         roomId: this.config.roomId,
         timestamp: Date.now(),
         payload: this.lastOpenPayload,
-      } as WSFrame<ConnectionOpenPayload>);
+      });
     }
 
     // Return unsubscribe function
